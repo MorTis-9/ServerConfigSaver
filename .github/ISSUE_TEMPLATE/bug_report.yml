@@ -1,0 +1,85 @@
+name: Bug report / Hata bildirimi
+description: Report a problem with ServerConfigSaver / ServerConfigSaver ile ilgili sorun bildir
+title: "[Bug] "Q
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search existing issues first.
+        Hata bildirdiğin için teşekkürler. Önce benzer bir bildirim olup olmadığını kontrol et.
+
+        **Privacy / Gizlilik:** Before posting logs, remove Minecraft usernames, server addresses, tokens, and other private information.
+        Günlükleri paylaşmadan önce Minecraft kullanıcı adını, sunucu adreslerini, tokenları ve diğer özel bilgileri sil.
+
+  - type: input
+    id: mod-version
+    attributes:
+      label: ServerConfigSaver version / Mod sürümü
+      description: The version shown in Mod Menu or the downloaded JAR name.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: minecraft-version
+    attributes:
+      label: Minecraft version / Minecraft sürümü
+      placeholder: "1.21.11"
+    validations:
+      required: true
+
+  - type: input
+    id: loader-version
+    attributes:
+      label: Fabric Loader version / Fabric Loader sürümü
+      placeholder: "0.19.5"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened? / Ne oldu?
+      description: Describe the problem clearly.
+      placeholder: Tell us what went wrong...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce / Tekrarlama adımları
+      description: List the steps needed to reproduce the issue.
+      placeholder: |
+        1. Join a server...
+        2. Change a setting...
+        3. Disconnect...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / Beklenen davranış
+      placeholder: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or crash report / Günlük veya çökme raporu
+      description: Paste relevant excerpts or attach a crash report after removing private information.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: mod-list
+    attributes:
+      label: Other installed mods / Yüklü diğer modlar
+      description: Include mods that may relate to settings or configuration.
+      placeholder: Mod names and versions...
+    validations:
+      required: false
