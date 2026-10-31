@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "serverbound",
+  "version": "${version}",
+  "name": "ServerConfigSaver",
+  "description": "Keep separate Minecraft client options and supported mod configuration files for each multiplayer server.",
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": { "client": ["dev.serverbound.client.ServerboundClient"] },
+  "mixins": ["serverbound.client.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
