@@ -153,9 +153,11 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
                 if (isExcluded(relative)) continue;
                 Path destination = target.resolve(relative);
                 if (Files.isDirectory(path)) Files.createDirectories(destination);
-                else if (Files.isRegularFile(path)
-                        && (!Files.isRegularFile(destination) || Files.mismatch(path, destination) != -1)) {
-                    atomicCopy(path, destination);
+                else if (Files.isRegularFile(path)) {
+                    boolean differs = !Files.isRegularFile(destination)
+                        || Files.size(path) != Files.size(destination)
+                        || !Files.getLastModifiedTime(path).equals(Files.getLastModifiedTime(destination));
+                    if (differs) atomicCopy(path, destination);
                 }
             }
         }

@@ -45,10 +45,10 @@ public final class ServerboundClient implements ClientModInitializer {
                 toggle = Button.builder(toggleLabel(), button -> {
                 ProfileManager.toggle(client);
                 button.setMessage(toggleLabel());
-                }).bounds(0, 0, 96, 18).build();
+                }).bounds(0, 0, 126, 18).build();
                 PROFILE_BUTTONS.put(screen, toggle);
             }
-            toggle.setPosition(Math.max(6, scaledWidth - 205), Math.max(6, scaledHeight - 54));
+            toggle.setPosition(Math.max(6, scaledWidth - 142), Math.max(6, scaledHeight - 30));
             if (!screen.children().contains(toggle))
                 ((ScreenAccessor) screen).serverbound$addRenderableWidget(toggle);
             toggle.setMessage(toggleLabel());
