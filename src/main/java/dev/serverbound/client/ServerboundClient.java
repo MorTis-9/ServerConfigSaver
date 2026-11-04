@@ -39,7 +39,7 @@ public final class ServerboundClient implements ClientModInitializer {
                 ProfileManager.toggle(client);
                 button.setMessage(toggleLabel());
             }).bounds(Math.max(6, scaledWidth - 102), screen instanceof TitleScreen
-                ? Math.max(6, scaledHeight - 24) : 6, 96, 18).build();
+                ? Math.max(6, scaledHeight - 24) : Math.max(6, scaledHeight - 100), 96, 18).build();
             ((ScreenAccessor) screen).serverbound$addRenderableWidget(toggle);
         });
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> ProfileManager.activate(client, handler.getConnection().getRemoteAddress()));

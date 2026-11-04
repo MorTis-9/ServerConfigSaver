@@ -11,55 +11,44 @@ final class ModConfigIntegrations {
     private ModConfigIntegrations() { }
 
     static void reloadProfileManagedConfigs() {
-        reloadMidnightConfigs();
-        reloadAutoConfigs();
+        reloadReachDisplay();
+        reloadGammaUtils();
         refreshGammaUtilsRuntime();
         reloadZoomify();
         reloadHealthIndicators();
         reloadCombatHitboxes();
     }
 
-    /** Reload every config registered through MidnightLib, including Reach Display. */
-    private static void reloadMidnightConfigs() {
+    private static void reloadReachDisplay() {
         try {
             Class<?> midnightConfig = Class.forName("eu.midnightdust.lib.config.MidnightConfig");
             Field instancesField = midnightConfig.getField("configInstances");
             Object instancesValue = instancesField.get(null);
             if (!(instancesValue instanceof Map<?, ?> instances)) return;
+            Object reachDisplay = instances.get("reach_display");
+            if (reachDisplay == null) return;
             Method loadValues = midnightConfig.getMethod("loadValuesFromJson");
-            for (Object config : instances.values()) {
-                if (config == null) continue;
-                try { loadValues.invoke(config); }
-                catch (ReflectiveOperationException | RuntimeException e) {
-                    LoggerFactory.getLogger("Serverbound").warn("Could not reload a MidnightLib config", e);
-                }
-            }
+            loadValues.invoke(reachDisplay);
         } catch (ClassNotFoundException | NoSuchFieldException | NoSuchMethodException ignored) {
-            // MidnightLib is not installed.
+            // Reach Display or MidnightLib is not installed.
         } catch (ReflectiveOperationException | RuntimeException e) {
-            LoggerFactory.getLogger("Serverbound").warn("Could not reload MidnightLib configs", e);
+            LoggerFactory.getLogger("Serverbound").warn("Could not reload Reach Display settings", e);
         }
     }
 
-    /** Reload every config registered through Cloth Config's AutoConfig API. */
-    private static void reloadAutoConfigs() {
+    /** Reload Gamma Utils only; reloading every AutoConfig holder can disrupt unrelated mods. */
+    private static void reloadGammaUtils() {
         try {
-            Class<?> autoConfig = Class.forName("me.shedaniel.autoconfig.AutoConfig");
-            Field holdersField = autoConfig.getDeclaredField("holders");
-            holdersField.setAccessible(true);
-            Object holdersValue = holdersField.get(null);
-            if (!(holdersValue instanceof Map<?, ?> holders)) return;
-            for (Object holder : holders.values()) {
-                if (holder == null) continue;
-                try { holder.getClass().getMethod("load").invoke(holder); }
-                catch (ReflectiveOperationException | RuntimeException e) {
-                    LoggerFactory.getLogger("Serverbound").warn("Could not reload an AutoConfig setting", e);
-                }
-            }
-        } catch (ClassNotFoundException | NoSuchFieldException ignored) {
-            // Cloth Config / AutoConfig is not installed.
+            Class<?> gammaUtils = Class.forName("io.github.sjouwer.gammautils.GammaUtils");
+            Field holderField = gammaUtils.getDeclaredField("configHolder");
+            holderField.setAccessible(true);
+            Object holder = holderField.get(null);
+            if (holder == null) return;
+            holder.getClass().getMethod("load").invoke(holder);
+        } catch (ClassNotFoundException | NoSuchFieldException | NoSuchMethodException ignored) {
+            // Gamma Utils or this version's config API is not installed.
         } catch (ReflectiveOperationException | RuntimeException e) {
-            LoggerFactory.getLogger("Serverbound").warn("Could not reload AutoConfig settings", e);
+            LoggerFactory.getLogger("Serverbound").warn("Could not reload Gamma Utils config", e);
         }
     }
 
