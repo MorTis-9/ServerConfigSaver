@@ -11,25 +11,68 @@ final class ModConfigIntegrations {
     private ModConfigIntegrations() { }
 
     static void reloadProfileManagedConfigs() {
-        reloadReachDisplay();
+        reloadMidnightConfigs();
+        reloadAutoConfigs();
+        reloadZoomify();
         reloadHealthIndicators();
         reloadCombatHitboxes();
     }
 
-    private static void reloadReachDisplay() {
+    /** Reload every config registered through MidnightLib, including Reach Display. */
+    private static void reloadMidnightConfigs() {
         try {
             Class<?> midnightConfig = Class.forName("eu.midnightdust.lib.config.MidnightConfig");
             Field instancesField = midnightConfig.getField("configInstances");
             Object instancesValue = instancesField.get(null);
             if (!(instancesValue instanceof Map<?, ?> instances)) return;
-            Object reachDisplay = instances.get("reach_display");
-            if (reachDisplay == null) return;
             Method loadValues = midnightConfig.getMethod("loadValuesFromJson");
-            loadValues.invoke(reachDisplay);
+            for (Object config : instances.values()) {
+                if (config == null) continue;
+                try { loadValues.invoke(config); }
+                catch (ReflectiveOperationException | RuntimeException e) {
+                    LoggerFactory.getLogger("Serverbound").warn("Could not reload a MidnightLib config", e);
+                }
+            }
         } catch (ClassNotFoundException | NoSuchFieldException | NoSuchMethodException ignored) {
-            // Reach Display or its config library is not installed.
+            // MidnightLib is not installed.
         } catch (ReflectiveOperationException | RuntimeException e) {
-            LoggerFactory.getLogger("Serverbound").warn("Could not reload Reach Display settings", e);
+            LoggerFactory.getLogger("Serverbound").warn("Could not reload MidnightLib configs", e);
+        }
+    }
+
+    /** Reload every config registered through Cloth Config's AutoConfig API. */
+    private static void reloadAutoConfigs() {
+        try {
+            Class<?> autoConfig = Class.forName("me.shedaniel.autoconfig.AutoConfig");
+            Field holdersField = autoConfig.getDeclaredField("holders");
+            holdersField.setAccessible(true);
+            Object holdersValue = holdersField.get(null);
+            if (!(holdersValue instanceof Map<?, ?> holders)) return;
+            for (Object holder : holders.values()) {
+                if (holder == null) continue;
+                try { holder.getClass().getMethod("load").invoke(holder); }
+                catch (ReflectiveOperationException | RuntimeException e) {
+                    LoggerFactory.getLogger("Serverbound").warn("Could not reload an AutoConfig setting", e);
+                }
+            }
+        } catch (ClassNotFoundException | NoSuchFieldException ignored) {
+            // Cloth Config / AutoConfig is not installed.
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            LoggerFactory.getLogger("Serverbound").warn("Could not reload AutoConfig settings", e);
+        }
+    }
+
+    /** Zoomify stores settings in the YACL v3 singleton and exposes file reload there. */
+    private static void reloadZoomify() {
+        try {
+            Class<?> settings = Class.forName("dev.isxander.zoomify.config.ZoomifySettings");
+            Field companionField = settings.getField("Companion");
+            Object settingsInstance = companionField.get(null);
+            settings.getMethod("loadFromFile").invoke(settingsInstance);
+        } catch (ClassNotFoundException | NoSuchFieldException | NoSuchMethodException ignored) {
+            // Zoomify is not installed, or this version has no reload method.
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            LoggerFactory.getLogger("Serverbound").warn("Could not reload Zoomify settings", e);
         }
     }
 

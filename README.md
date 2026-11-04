@@ -2,8 +2,6 @@
 
 **ServerConfigSaver** is a client-side Fabric mod that keeps separate Minecraft options and mod configuration files for each multiplayer server. Profiles are stored locally and selected automatically when you join a server.
 
-Report bugs using the [GitHub issue form](https://github.com/MorTis-9/ServerConfigSaver/issues/new/choose).
-
 ## Features
 
 - Saves a separate profile for each multiplayer server address and port.
@@ -13,7 +11,7 @@ Report bugs using the [GitHub issue form](https://github.com/MorTis-9/ServerConf
 - Lets you enable or disable profiles, reset the active profile to the initial shared-settings snapshot, or copy the active profile to another server profile.
 - Restores shared settings after disconnect. If the game crashes during a server session, it attempts to restore the shared snapshot on next launch.
 - Leaves resource-pack handling to Minecraft's normal behavior.
-- Includes optional reload integrations for Reach Display, Health Indicators, and Combat Hitboxes.
+- Includes reload integrations for MidnightLib configs (including Reach Display), AutoConfig mods (including Gamma Utils), Zoomify, Health Indicators, and Combat Hitboxes.
 
 ## Compatibility and limitations
 
@@ -21,14 +19,14 @@ Report bugs using the [GitHub issue form](https://github.com/MorTis-9/ServerConf
 - **Fabric**; client-side only
 - Requires Fabric Loader **0.19.5 or newer**, Fabric API, and Java 21 or newer.
 
-ServerConfigSaver can profile files saved under `.minecraft/config` and root-level `options*.txt` files. It cannot guarantee support for every mod: some mods store settings elsewhere, keep them only in memory, or do not reload changed files while the game is running. Copying a config file into a profile does not necessarily apply that setting immediately. Resource packs are intentionally excluded.
+ServerConfigSaver profiles files saved under `.minecraft/config` and root-level `options*.txt` files. It includes reload integrations for several popular mods and config libraries, but cannot guarantee support for every mod: some store settings elsewhere, cache them in memory, or do not expose a reload method. Such settings are still saved when their files are profile-managed, but may require restarting the game or may not take effect until the mod is supported. Resource packs are intentionally excluded.
 
 Profiles and the shared-settings snapshot are stored in `.minecraft/serverbound/`.
 
 ## Use
 
 - Press **O** to open the profile screen. The key can be changed in Minecraft's Controls menu.
-- Use the button at the bottom-right of the title screen to enable or disable server profiles.
+- Use the button at the bottom-right of the title screen or the top-right of the multiplayer screen to enable or disable server profiles.
 - The profile screen lets you reset the active server profile or copy it to another server. Enter the server address; a custom port is optional (for example `play.example.net:25566`). If omitted, port `25565` is used.
 - Client commands: `/serverbound status`, `/serverbound toggle`, `/serverbound reset`, and `/serverbound copy <destination>`.
 
@@ -61,7 +59,7 @@ ServerConfigSaver is licensed under the MIT License. See [LICENSE](LICENSE) for 
 - Profilleri açıp kapatmaya, etkin profili ortak ayarların ilk yedeğine sıfırlamaya ve etkin profili başka sunucu profiline kopyalamaya izin verir.
 - Sunucudan çıkınca ortak ayarları geri yükler. Oyun sunucudayken çökerse sonraki açılışta yedeği geri yüklemeyi dener.
 - Kaynak paketlerini Minecraft'ın normal yönetimine bırakır.
-- Reach Display, Health Indicators ve Combat Hitboxes için isteğe bağlı özel yeniden yükleme desteği içerir.
+- MidnightLib kullanan yapılandırmalar (Reach Display dâhil), AutoConfig kullanan modlar (Gamma Utils dâhil), Zoomify, Health Indicators ve Combat Hitboxes için yeniden yükleme desteği içerir.
 
 ## Uyumluluk ve sınırlar
 
@@ -69,14 +67,14 @@ ServerConfigSaver is licensed under the MIT License. See [LICENSE](LICENSE) for 
 - **Fabric**, yalnızca istemci
 - Fabric Loader **0.19.5+**, Fabric API ve Java 21 veya yenisi gerekir.
 
-ServerConfigSaver, `.minecraft/config` içine ve kökteki `options*.txt` dosyalarına kaydedilen ayarları profilleyebilir. Her mod için destek garantisi vermez: bazı modlar ayarlarını başka yerde tutar, yalnızca bellekte saklar veya değişen dosyaları oyun çalışırken yeniden yüklemez. Bir dosyanın profile kopyalanması ayarın anında uygulanacağı anlamına gelmez. Kaynak paketleri özellikle kapsam dışıdır.
+ServerConfigSaver, `.minecraft/config` içine ve kökteki `options*.txt` dosyalarına kaydedilen ayarları profiller. Bazı yaygın modlar ve ayar kütüphaneleri için yeniden yükleme desteği vardır; ancak her mod garanti edilemez. Bazı modlar ayarlarını başka yerde tutar, bellekte önbelleğe alır veya yeniden yükleme yöntemi sunmaz. Bu dosyalar kaydedilse bile oyunu yeniden başlatmak gerekebilir ya da mod henüz desteklenmiyor olabilir. Kaynak paketleri kapsam dışıdır.
 
 Profiller ve ortak ayar yedeği `.minecraft/serverbound/` altında saklanır.
 
 ## Kullanım
 
 - Profil ekranını açmak için **O** tuşuna bas. Tuşu Minecraft'ın Kontroller menüsünden değiştirebilirsin.
-- Ana menünün sağ altındaki düğmeyle sunucu profillerini açıp kapatabilirsin.
+- Ana menünün sağ altındaki veya çok oyunculu ekranının sağ üstündeki düğmeyle sunucu profillerini açıp kapatabilirsin.
 - Profil ekranından etkin profili sıfırlayabilir veya başka sunucuya kopyalayabilirsin. Sunucu adresini gir; özel port isteğe bağlıdır (ör. `play.example.net:25566`). Port girmezsen `25565` kullanılır.
 - İstemci komutları: `/serverbound status`, `/serverbound toggle`, `/serverbound reset` ve `/serverbound copy <hedef>`.
 

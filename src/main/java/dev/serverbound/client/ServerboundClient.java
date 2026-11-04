@@ -11,6 +11,7 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -33,11 +34,12 @@ public final class ServerboundClient implements ClientModInitializer {
             }
         });
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-            if (!(screen instanceof TitleScreen)) return;
+            if (!(screen instanceof TitleScreen) && !(screen instanceof JoinMultiplayerScreen)) return;
             Button toggle = Button.builder(toggleLabel(), button -> {
                 ProfileManager.toggle(client);
                 button.setMessage(toggleLabel());
-            }).bounds(Math.max(6, scaledWidth - 150), Math.max(6, scaledHeight - 34), 144, 20).build();
+            }).bounds(Math.max(6, scaledWidth - 150), screen instanceof TitleScreen
+                ? Math.max(6, scaledHeight - 34) : 6, 144, 20).build();
             ((ScreenAccessor) screen).serverbound$addRenderableWidget(toggle);
         });
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> ProfileManager.activate(client, handler.getConnection().getRemoteAddress()));
