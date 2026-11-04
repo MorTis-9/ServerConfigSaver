@@ -129,6 +129,8 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
         thread.interrupt();
     }
 
+    void awaitTermination() throws InterruptedException { thread.join(); }
+
     static void copyTree(Path source, Path target) throws IOException {
         if (!Files.exists(source)) return;
         Files.createDirectories(target);

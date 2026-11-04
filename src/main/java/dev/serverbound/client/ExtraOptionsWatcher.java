@@ -96,4 +96,6 @@ final class ExtraOptionsWatcher implements AutoCloseable {
         try { watcher.close(); } catch (IOException ignored) { }
         thread.interrupt();
     }
+
+    void awaitTermination() throws InterruptedException { thread.join(); }
 }
