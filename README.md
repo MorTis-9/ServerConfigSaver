@@ -10,6 +10,7 @@
 - Watches supported config files during a session and mirrors completed disk writes to the active profile.
 - Lets you enable or disable profiles, reset the active profile to the initial shared-settings snapshot, or copy the active profile to another server profile.
 - Restores shared settings after disconnect. If the game crashes during a server session, it attempts to restore the shared snapshot on next launch.
+- Offers a global sync switch that copies future Minecraft and profile-managed config changes to every server profile and shared settings.
 - Leaves resource-pack handling to Minecraft's normal behavior.
 - Includes reload integrations for MidnightLib configs (including Reach Display), AutoConfig mods (including Gamma Utils), Zoomify, Health Indicators, and Combat Hitboxes.
 
@@ -27,6 +28,7 @@ Profiles and the shared-settings snapshot are stored in `.minecraft/serverbound/
 
 - Press **O** to open the profile screen. The key can be changed in Minecraft's Controls menu.
 - Use the button at the bottom-right of the title screen or the top-right of the multiplayer screen to enable or disable server profiles.
+- Press **O** and enable **Sync changes to all profiles** when a change should also update every server profile and shared settings.
 - The profile screen lets you reset the active server profile or copy it to another server. Enter the server address; a custom port is optional (for example `play.example.net:25566`). If omitted, port `25565` is used.
 - Client commands: `/serverbound status`, `/serverbound toggle`, `/serverbound reset`, and `/serverbound copy <destination>`.
 
@@ -58,6 +60,7 @@ ServerConfigSaver is licensed under the MIT License. See [LICENSE](LICENSE) for 
 - Oyun sırasında desteklenen dosyalardaki değişiklikleri izler ve diske yazma tamamlanınca profil kopyasını günceller.
 - Profilleri açıp kapatmaya, etkin profili ortak ayarların ilk yedeğine sıfırlamaya ve etkin profili başka sunucu profiline kopyalamaya izin verir.
 - Sunucudan çıkınca ortak ayarları geri yükler. Oyun sunucudayken çökerse sonraki açılışta yedeği geri yüklemeyi dener.
+- Tüm profillere eşitleme düğmesi, sonraki Minecraft ve desteklenen mod ayarı değişikliklerini tüm sunucu profillerine ve ortak ayarlara kopyalar.
 - Kaynak paketlerini Minecraft'ın normal yönetimine bırakır.
 - MidnightLib kullanan yapılandırmalar (Reach Display dâhil), AutoConfig kullanan modlar (Gamma Utils dâhil), Zoomify, Health Indicators ve Combat Hitboxes için yeniden yükleme desteği içerir.
 
@@ -75,6 +78,7 @@ Profiller ve ortak ayar yedeği `.minecraft/serverbound/` altında saklanır.
 
 - Profil ekranını açmak için **O** tuşuna bas. Tuşu Minecraft'ın Kontroller menüsünden değiştirebilirsin.
 - Ana menünün sağ altındaki veya çok oyunculu ekranının sağ üstündeki düğmeyle sunucu profillerini açıp kapatabilirsin.
+- **O** tuşuna basıp **Değişiklikleri tüm profillere uygula** seçeneğini açarsan sonraki değişiklikler tüm sunuculara ve ortak ayarlara da kopyalanır.
 - Profil ekranından etkin profili sıfırlayabilir veya başka sunucuya kopyalayabilirsin. Sunucu adresini gir; özel port isteğe bağlıdır (ör. `play.example.net:25566`). Port girmezsen `25565` kullanılır.
 - İstemci komutları: `/serverbound status`, `/serverbound toggle`, `/serverbound reset` ve `/serverbound copy <hedef>`.
 

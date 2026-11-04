@@ -15,11 +15,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 
 /** Mirrors config-folder writes into the active server's snapshot while the game is running. */
 final class ConfigSnapshotWatcher implements AutoCloseable {
     private final Path source;
     private final Path snapshot;
+    private final BiConsumer<Path, Boolean> changeListener;
     private final WatchService watcher;
     private final Map<WatchKey, Path> directories = new ConcurrentHashMap<>();
     /** A file is mirrored only after the same size and timestamp were seen twice. */
@@ -28,9 +30,10 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final Thread thread;
 
-    ConfigSnapshotWatcher(Path source, Path snapshot) throws IOException {
+    ConfigSnapshotWatcher(Path source, Path snapshot, BiConsumer<Path, Boolean> changeListener) throws IOException {
         this.source = source;
         this.snapshot = snapshot;
+        this.changeListener = changeListener;
         Files.createDirectories(source);
         Files.createDirectories(snapshot);
         watcher = FileSystems.getDefault().newWatchService();
@@ -100,6 +103,7 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
                 if (fingerprint.equals(previous) && !fingerprint.equals(mirrored.get(relative))) {
                     atomicCopy(file, snapshot.resolve(relative));
                     mirrored.put(relative, fingerprint);
+                    changeListener.accept(relative, false);
                 }
             }
         }
@@ -108,6 +112,7 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
             if (!seen.contains(stale)) {
                 Files.deleteIfExists(snapshot.resolve(stale));
                 mirrored.remove(stale);
+                changeListener.accept(stale, true);
             }
         }
     }
@@ -122,7 +127,6 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
         running.set(false);
         try { watcher.close(); } catch (IOException ignored) { }
         thread.interrupt();
-        try { thread.join(1500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 
     static void copyTree(Path source, Path target) throws IOException {
@@ -135,6 +139,32 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
                 Path destination = target.resolve(relative);
                 if (Files.isDirectory(path)) Files.createDirectories(destination);
                 else if (Files.isRegularFile(path)) atomicCopy(path, destination);
+            }
+        }
+    }
+
+    /** Refreshes a snapshot without rewriting unchanged files and removes stale settings. */
+    static void syncTree(Path source, Path target) throws IOException {
+        if (!Files.exists(source)) return;
+        Files.createDirectories(target);
+        Set<Path> present = new HashSet<>();
+        try (var paths = Files.walk(source)) {
+            for (Path file : paths.filter(Files::isRegularFile).toList()) {
+                Path relative = source.relativize(file);
+                if (isExcluded(relative)) continue;
+                present.add(relative);
+                Path saved = target.resolve(relative);
+                boolean differs = !Files.isRegularFile(saved)
+                    || Files.size(file) != Files.size(saved)
+                    || !Files.getLastModifiedTime(file).equals(Files.getLastModifiedTime(saved));
+                if (differs) atomicCopy(file, saved);
+            }
+        }
+        if (!Files.exists(target)) return;
+        try (var paths = Files.walk(target)) {
+            for (Path saved : paths.filter(Files::isRegularFile).toList()) {
+                Path relative = target.relativize(saved);
+                if (!isExcluded(relative) && !present.contains(relative)) Files.deleteIfExists(saved);
             }
         }
     }
@@ -162,8 +192,10 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
 
     static void atomicCopy(Path source, Path target) throws IOException {
         Files.createDirectories(target.getParent());
-        Path temp = target.resolveSibling(target.getFileName() + ".serverbound-tmp");
+        Path temp = target.resolveSibling(target.getFileName() + ".serverbound-tmp-" + Thread.currentThread().getId());
         Files.copy(source, temp, StandardCopyOption.REPLACE_EXISTING);
+        try { Files.setLastModifiedTime(temp, Files.getLastModifiedTime(source)); }
+        catch (IOException ignored) { }
         try { Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE); }
         catch (IOException e) { Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING); }
     }

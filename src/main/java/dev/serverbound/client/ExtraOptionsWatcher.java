@@ -8,18 +8,21 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 
 /** Snapshots top-level options*.txt files used by some mods outside the config folder. */
 final class ExtraOptionsWatcher implements AutoCloseable {
     private final Path gameDirectory;
     private final Path snapshotDirectory;
+    private final BiConsumer<Path, Boolean> changeListener;
     private final WatchService watcher;
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final Thread thread;
 
-    ExtraOptionsWatcher(Path gameDirectory, Path snapshotDirectory) throws IOException {
+    ExtraOptionsWatcher(Path gameDirectory, Path snapshotDirectory, BiConsumer<Path, Boolean> changeListener) throws IOException {
         this.gameDirectory = gameDirectory;
         this.snapshotDirectory = snapshotDirectory;
+        this.changeListener = changeListener;
         Files.createDirectories(gameDirectory);
         Files.createDirectories(snapshotDirectory);
         watcher = FileSystems.getDefault().newWatchService();
@@ -70,8 +73,11 @@ final class ExtraOptionsWatcher implements AutoCloseable {
                     if (!isExtraOption(file)) continue;
                     Path snapshot = snapshotDirectory.resolve(file.getFileName());
                     try {
-                        if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) Files.deleteIfExists(snapshot);
+                        boolean deleted = event.kind() == StandardWatchEventKinds.ENTRY_DELETE;
+                        if (deleted) Files.deleteIfExists(snapshot);
                         else if (Files.isRegularFile(file)) ConfigSnapshotWatcher.atomicCopy(file, snapshot);
+                        else continue;
+                        changeListener.accept(file.getFileName(), deleted);
                     } catch (IOException ignored) { /* A later event or disconnect snapshot retries the copy. */ }
                 }
                 if (!key.reset()) break;
@@ -89,6 +95,5 @@ final class ExtraOptionsWatcher implements AutoCloseable {
         running.set(false);
         try { watcher.close(); } catch (IOException ignored) { }
         thread.interrupt();
-        try { thread.join(1500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 }

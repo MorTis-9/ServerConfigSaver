@@ -22,6 +22,7 @@ public final class ProfileManager {
     private static String activeLabel;
     private static SocketAddress connectedRemote;
     private static boolean enabled = true;
+    private static volatile boolean syncAllProfiles;
     private static ConfigSnapshotWatcher configWatcher;
     private static ExtraOptionsWatcher extraOptionsWatcher;
 
@@ -34,6 +35,7 @@ public final class ProfileManager {
             try (var input = Files.newInputStream(settings)) {
                 properties.load(input);
                 enabled = Boolean.parseBoolean(properties.getProperty("enabled", "true"));
+                syncAllProfiles = Boolean.parseBoolean(properties.getProperty("syncAllProfiles", "false"));
             } catch (IOException e) { log("Could not read settings", e); }
         }
         Path marker = root(client).resolve("active-profile.txt");
@@ -49,6 +51,7 @@ public final class ProfileManager {
         Path settings = root(client).resolve("settings.properties");
         Properties properties = new Properties();
         properties.setProperty("enabled", Boolean.toString(enabled));
+        properties.setProperty("syncAllProfiles", Boolean.toString(syncAllProfiles));
         try {
             Files.createDirectories(settings.getParent());
             try (var output = Files.newOutputStream(settings)) { properties.store(output, "Serverbound preferences"); }
@@ -96,8 +99,10 @@ public final class ProfileManager {
                 ConfigSnapshotWatcher.copyTree(profileConfig, configDir());
                 ModConfigIntegrations.reloadProfileManagedConfigs();
             }
-            configWatcher = new ConfigSnapshotWatcher(configDir(), profileConfig);
-            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), profileExtraOptions);
+            configWatcher = new ConfigSnapshotWatcher(configDir(), profileConfig,
+                (relative, deleted) -> mirrorConfigChange(client, relative, deleted));
+            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), profileExtraOptions,
+                (name, deleted) -> mirrorRootOptionChange(client, name, deleted));
             message(client, "serverbound.message.profile_activated", activeLabel);
         } catch (Exception e) {
             log("Could not activate profile", e);
@@ -122,11 +127,7 @@ public final class ProfileManager {
     }
 
     public static synchronized void onOptionsSaved(Minecraft client) {
-        if (activeId != null && enabled) persistOptions(client);
-        else {
-            try { OptionsProfileSnapshot.save(optionsFile(client), root(client).resolve("defaults/options.txt")); }
-            catch (IOException e) { log("Could not update shared options snapshot", e); }
-        }
+        persistOptions(client);
     }
 
     public static synchronized void autosave(Minecraft client) {
@@ -158,6 +159,15 @@ public final class ProfileManager {
         return 1;
     }
 
+    public static synchronized boolean syncAllProfiles() { return syncAllProfiles; }
+
+    public static synchronized int toggleSyncAllProfiles(Minecraft client) {
+        syncAllProfiles = !syncAllProfiles;
+        saveSettings(client);
+        message(client, syncAllProfiles ? "serverbound.message.sync_all_enabled" : "serverbound.message.sync_all_disabled");
+        return 1;
+    }
+
     public static synchronized int report(Minecraft client) {
         if (!enabled) message(client, "serverbound.message.status_disabled");
         else if (activeLabel == null) message(client, "serverbound.message.status_no_profile");
@@ -185,8 +195,10 @@ public final class ProfileManager {
             ConfigSnapshotWatcher.deleteTree(profile.resolve("config"));
             ConfigSnapshotWatcher.copyTree(configDir(), profile.resolve("config"));
             ExtraOptionsWatcher.copyCurrent(client.gameDirectory.toPath(), profile.resolve("root-options"));
-            configWatcher = new ConfigSnapshotWatcher(configDir(), profile.resolve("config"));
-            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), profile.resolve("root-options"));
+            configWatcher = new ConfigSnapshotWatcher(configDir(), profile.resolve("config"),
+                (relative, deleted) -> mirrorConfigChange(client, relative, deleted));
+            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), profile.resolve("root-options"),
+                (name, deleted) -> mirrorRootOptionChange(client, name, deleted));
             message(client, "serverbound.message.reset_success");
             return 1;
         } catch (IOException e) { log("Could not reset profile", e); message(client, "serverbound.message.reset_failed"); return 0; }
@@ -207,8 +219,10 @@ public final class ProfileManager {
             Path targetDir = profilesDir(client).resolve(target);
             ConfigSnapshotWatcher.deleteTree(targetDir);
             ConfigSnapshotWatcher.copyTree(profileDir(client), targetDir);
-            configWatcher = new ConfigSnapshotWatcher(configDir(), profileDir(client).resolve("config"));
-            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), profileDir(client).resolve("root-options"));
+            configWatcher = new ConfigSnapshotWatcher(configDir(), profileDir(client).resolve("config"),
+                (relative, deleted) -> mirrorConfigChange(client, relative, deleted));
+            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), profileDir(client).resolve("root-options"),
+                (name, deleted) -> mirrorRootOptionChange(client, name, deleted));
             message(client, "serverbound.message.copy_success", target);
             return 1;
         } catch (IOException e) { log("Could not copy profile", e); message(client, "serverbound.message.copy_failed"); return 0; }
@@ -226,16 +240,23 @@ public final class ProfileManager {
     private static void persist(Minecraft client) {
         persistOptions(client);
         if (activeId == null) return;
-        try { ConfigSnapshotWatcher.copyTree(configDir(), profileDir(client).resolve("config")); }
+        try { ConfigSnapshotWatcher.syncTree(configDir(), profileDir(client).resolve("config")); }
         catch (IOException e) { log("Could not save mod config snapshot", e); }
         try { ExtraOptionsWatcher.copyCurrent(client.gameDirectory.toPath(), profileDir(client).resolve("root-options")); }
         catch (IOException e) { log("Could not save extra mod options", e); }
+        if (syncAllProfiles) {
+            broadcastConfigTree(client);
+            broadcastRootOptions(client);
+        }
     }
 
     private static void persistOptions(Minecraft client) {
-        if (activeId == null) return;
-        try { OptionsProfileSnapshot.save(optionsFile(client), profileDir(client).resolve("options.txt")); }
+        Path currentSnapshot = activeId == null
+            ? root(client).resolve("defaults/options.txt")
+            : profileDir(client).resolve("options.txt");
+        try { OptionsProfileSnapshot.save(optionsFile(client), currentSnapshot); }
         catch (IOException e) { log("Could not save vanilla options", e); }
+        if (syncAllProfiles) broadcastOptions(client);
     }
 
     private static void captureDefaults(Minecraft client) throws IOException {
@@ -265,8 +286,10 @@ public final class ProfileManager {
     private static void startDefaultWatcher(Minecraft client) {
         if (configWatcher != null || activeId != null) return;
         try {
-            configWatcher = new ConfigSnapshotWatcher(configDir(), root(client).resolve("defaults/config"));
-            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), root(client).resolve("defaults/root-options"));
+            configWatcher = new ConfigSnapshotWatcher(configDir(), root(client).resolve("defaults/config"),
+                (relative, deleted) -> mirrorConfigChange(client, relative, deleted));
+            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), root(client).resolve("defaults/root-options"),
+                (name, deleted) -> mirrorRootOptionChange(client, name, deleted));
         }
         catch (IOException e) { log("Could not watch shared mod settings", e); }
     }
@@ -299,6 +322,84 @@ public final class ProfileManager {
     private static void stopWatcher() {
         if (configWatcher != null) { configWatcher.close(); configWatcher = null; }
         if (extraOptionsWatcher != null) { extraOptionsWatcher.close(); extraOptionsWatcher = null; }
+    }
+
+    private static void broadcastOptions(Minecraft client) {
+        Path live = optionsFile(client);
+        try { OptionsProfileSnapshot.save(live, root(client).resolve("defaults/options.txt")); }
+        catch (IOException e) { log("Could not copy shared options to all profiles", e); }
+        Path profiles = profilesDir(client);
+        if (!Files.isDirectory(profiles)) return;
+        try (var directories = Files.list(profiles)) {
+            for (Path profile : directories.filter(Files::isDirectory).toList()) {
+                try { OptionsProfileSnapshot.save(live, profile.resolve("options.txt")); }
+                catch (IOException e) { log("Could not update options for profile " + profile.getFileName(), e); }
+            }
+        } catch (IOException e) { log("Could not enumerate server profiles", e); }
+    }
+
+    private static void mirrorConfigChange(Minecraft client, Path relative, boolean deleted) {
+        if (!syncAllProfiles || relative == null || relative.toString().isBlank()) return;
+        Path source = configDir().resolve(relative);
+        mirrorFile(source, root(client).resolve("defaults/config").resolve(relative), deleted);
+        Path profiles = profilesDir(client);
+        if (!Files.isDirectory(profiles)) return;
+        try (var directories = Files.list(profiles)) {
+            for (Path profile : directories.filter(Files::isDirectory).toList())
+                mirrorFile(source, profile.resolve("config").resolve(relative), deleted);
+        } catch (IOException e) { log("Could not mirror a changed config to all profiles", e); }
+    }
+
+    private static void mirrorRootOptionChange(Minecraft client, Path name, boolean deleted) {
+        if (!syncAllProfiles || name == null || name.getNameCount() != 1) return;
+        Path source = client.gameDirectory.toPath().resolve(name);
+        mirrorFile(source, root(client).resolve("defaults/root-options").resolve(name), deleted);
+        Path profiles = profilesDir(client);
+        if (!Files.isDirectory(profiles)) return;
+        try (var directories = Files.list(profiles)) {
+            for (Path profile : directories.filter(Files::isDirectory).toList())
+                mirrorFile(source, profile.resolve("root-options").resolve(name), deleted);
+        } catch (IOException e) { log("Could not mirror a mod options file to all profiles", e); }
+    }
+
+    private static void mirrorFile(Path source, Path target, boolean deleted) {
+        try {
+            if (deleted || !Files.isRegularFile(source)) {
+                Files.deleteIfExists(target);
+            } else if (!Files.isRegularFile(target) || Files.mismatch(source, target) != -1) {
+                ConfigSnapshotWatcher.atomicCopy(source, target);
+            }
+        } catch (IOException e) { log("Could not mirror a settings file to all profiles", e); }
+    }
+
+    private static void broadcastConfigTree(Minecraft client) {
+        Path profiles = profilesDir(client);
+        if (!Files.isDirectory(profiles)) return;
+        try (var directories = Files.list(profiles)) {
+            for (Path profile : directories.filter(Files::isDirectory).toList())
+                copySettingsTree(configDir(), profile.resolve("config"), profile.getFileName().toString());
+        } catch (IOException e) { log("Could not enumerate server profiles for settings sync", e); }
+        copySettingsTree(configDir(), root(client).resolve("defaults/config"), "shared");
+    }
+
+    private static void copySettingsTree(Path source, Path target, String label) {
+        try {
+            ConfigSnapshotWatcher.syncTree(source, target);
+        } catch (IOException e) { log("Could not sync settings for " + label, e); }
+    }
+
+    private static void broadcastRootOptions(Minecraft client) {
+        Path game = client.gameDirectory.toPath();
+        try { ExtraOptionsWatcher.copyCurrent(game, root(client).resolve("defaults/root-options")); }
+        catch (IOException e) { log("Could not sync shared mod options", e); }
+        Path profiles = profilesDir(client);
+        if (!Files.isDirectory(profiles)) return;
+        try (var directories = Files.list(profiles)) {
+            for (Path profile : directories.filter(Files::isDirectory).toList()) {
+                try { ExtraOptionsWatcher.copyCurrent(game, profile.resolve("root-options")); }
+                catch (IOException e) { log("Could not sync mod options for " + profile.getFileName(), e); }
+            }
+        } catch (IOException e) { log("Could not enumerate server profiles for mod options sync", e); }
     }
 
     private static Path root(Minecraft client) { return client.gameDirectory.toPath().resolve(ROOT); }

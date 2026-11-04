@@ -13,6 +13,7 @@ final class ModConfigIntegrations {
     static void reloadProfileManagedConfigs() {
         reloadMidnightConfigs();
         reloadAutoConfigs();
+        refreshGammaUtilsRuntime();
         reloadZoomify();
         reloadHealthIndicators();
         reloadCombatHitboxes();
@@ -73,6 +74,41 @@ final class ModConfigIntegrations {
             // Zoomify is not installed, or this version has no reload method.
         } catch (ReflectiveOperationException | RuntimeException e) {
             LoggerFactory.getLogger("Serverbound").warn("Could not reload Zoomify settings", e);
+        }
+    }
+
+    /** Gamma Utils caches nested settings in static manager fields after startup. */
+    private static void refreshGammaUtilsRuntime() {
+        try {
+            Class<?> gammaUtils = Class.forName("io.github.sjouwer.gammautils.GammaUtils");
+            Object config = gammaUtils.getMethod("getConfig").invoke(null);
+            Object gammaSettings = config.getClass().getField("gamma").get(config);
+            Object nightVisionSettings = config.getClass().getField("nightVision").get(config);
+            copySettings(gammaSettings, "io.github.sjouwer.gammautils.GammaManager", "gamma");
+            copySettings(nightVisionSettings, "io.github.sjouwer.gammautils.NightVisionManager", "nightVision");
+            gammaUtils.getMethod("saveConfig").invoke(null);
+            Class.forName("io.github.sjouwer.gammautils.GammaManager").getMethod("setDynamicGamma").invoke(null);
+            Class.forName("io.github.sjouwer.gammautils.NightVisionManager").getMethod("setDynamicNightVision").invoke(null);
+        } catch (ClassNotFoundException | NoSuchMethodException | NoSuchFieldException ignored) {
+            // Gamma Utils is not installed, or this version has a different runtime API.
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            LoggerFactory.getLogger("Serverbound").warn("Could not apply Gamma Utils settings", e);
+        }
+    }
+
+    private static void copySettings(Object source, String managerName, String fieldName)
+            throws ReflectiveOperationException {
+        if (source == null) return;
+        Class<?> manager = Class.forName(managerName);
+        Field cachedField = manager.getDeclaredField(fieldName);
+        cachedField.setAccessible(true);
+        Object cached = cachedField.get(null);
+        if (cached == null || !cached.getClass().equals(source.getClass())) return;
+        for (Field setting : source.getClass().getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isStatic(setting.getModifiers())
+                    || java.lang.reflect.Modifier.isFinal(setting.getModifiers())) continue;
+            setting.setAccessible(true);
+            setting.set(cached, setting.get(source));
         }
     }
 
