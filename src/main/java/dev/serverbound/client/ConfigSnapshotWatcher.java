@@ -143,6 +143,24 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
         }
     }
 
+    /** Overlays settings without touching files whose contents are already correct. */
+    static void overlayTree(Path source, Path target) throws IOException {
+        if (!Files.exists(source)) return;
+        Files.createDirectories(target);
+        try (var paths = Files.walk(source)) {
+            for (Path path : paths.toList()) {
+                Path relative = source.relativize(path);
+                if (isExcluded(relative)) continue;
+                Path destination = target.resolve(relative);
+                if (Files.isDirectory(path)) Files.createDirectories(destination);
+                else if (Files.isRegularFile(path)
+                        && (!Files.isRegularFile(destination) || Files.mismatch(path, destination) != -1)) {
+                    atomicCopy(path, destination);
+                }
+            }
+        }
+    }
+
     /** Refreshes a snapshot without rewriting unchanged files and removes stale settings. */
     static void syncTree(Path source, Path target) throws IOException {
         if (!Files.exists(source)) return;

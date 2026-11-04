@@ -95,8 +95,8 @@ public final class ProfileManager {
             if (!Files.exists(profileConfig)) ConfigSnapshotWatcher.copyTree(configDir(), profileConfig);
             else {
                 // Overlay the selected profile without deleting files a mod may keep outside its snapshot.
-                ConfigSnapshotWatcher.copyTree(root(client).resolve("defaults/config"), configDir());
-                ConfigSnapshotWatcher.copyTree(profileConfig, configDir());
+                ConfigSnapshotWatcher.overlayTree(root(client).resolve("defaults/config"), configDir());
+                ConfigSnapshotWatcher.overlayTree(profileConfig, configDir());
                 ModConfigIntegrations.reloadProfileManagedConfigs();
             }
             configWatcher = new ConfigSnapshotWatcher(configDir(), profileConfig,
@@ -311,7 +311,7 @@ public final class ProfileManager {
             }
             Path defaultConfig = defaults.resolve("config");
             if (Files.exists(defaultConfig)) {
-                ConfigSnapshotWatcher.copyTree(defaultConfig, configDir());
+                ConfigSnapshotWatcher.overlayTree(defaultConfig, configDir());
                 if (client.options != null) ModConfigIntegrations.reloadProfileManagedConfigs();
             }
             ExtraOptionsWatcher.restore(client.gameDirectory.toPath(), defaults.resolve("root-options"));

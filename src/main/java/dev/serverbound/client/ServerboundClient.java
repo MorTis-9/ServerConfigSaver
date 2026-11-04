@@ -10,16 +10,19 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import com.mojang.blaze3d.platform.InputConstants;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.argument;
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal;
 
 public final class ServerboundClient implements ClientModInitializer {
+    private static final Map<Screen, Button> PROFILE_BUTTONS = new WeakHashMap<>();
     private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
         Identifier.fromNamespaceAndPath("serverbound", "main"));
 
@@ -34,13 +37,21 @@ public final class ServerboundClient implements ClientModInitializer {
             }
         });
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-            if (!(screen instanceof TitleScreen) && !(screen instanceof JoinMultiplayerScreen)) return;
-            Button toggle = Button.builder(toggleLabel(), button -> {
+            // Keep the control only on Multiplayer. The screen may be initialized
+            // again after fullscreen/GUI-scale changes, so reuse its widget.
+            if (!(screen instanceof JoinMultiplayerScreen)) return;
+            Button toggle = PROFILE_BUTTONS.get(screen);
+            if (toggle == null) {
+                toggle = Button.builder(toggleLabel(), button -> {
                 ProfileManager.toggle(client);
                 button.setMessage(toggleLabel());
-            }).bounds(Math.max(6, scaledWidth - 102), screen instanceof TitleScreen
-                ? Math.max(6, scaledHeight - 24) : Math.max(6, scaledHeight - 100), 96, 18).build();
-            ((ScreenAccessor) screen).serverbound$addRenderableWidget(toggle);
+                }).bounds(0, 0, 96, 18).build();
+                PROFILE_BUTTONS.put(screen, toggle);
+            }
+            toggle.setPosition(Math.max(6, scaledWidth - 205), Math.max(6, scaledHeight - 54));
+            if (!screen.children().contains(toggle))
+                ((ScreenAccessor) screen).serverbound$addRenderableWidget(toggle);
+            toggle.setMessage(toggleLabel());
         });
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> ProfileManager.activate(client, handler.getConnection().getRemoteAddress()));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> ProfileManager.deactivate(client));
