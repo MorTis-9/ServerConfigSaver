@@ -25,6 +25,8 @@ public final class ProfileManager {
     private static boolean enabled = true;
     private static volatile boolean syncAllProfiles;
     private static boolean disconnectRestorePending;
+    private static boolean activationPending;
+    private static boolean disconnectAfterActivation;
     private static SocketAddress pendingRemote;
     private static final AtomicBoolean optionsBroadcastPending = new AtomicBoolean();
     private static final AtomicBoolean optionsBroadcastDirty = new AtomicBoolean();
@@ -64,66 +66,128 @@ public final class ProfileManager {
     }
 
     public static synchronized void activate(Minecraft client, SocketAddress remote) {
-        if (disconnectRestorePending) {
+        if (disconnectRestorePending || activationPending) {
             pendingRemote = remote;
+            if (activationPending) disconnectAfterActivation = true;
             return;
         }
         connectedRemote = remote;
         if (!enabled || !(remote instanceof InetSocketAddress)) return;
-        stopWatcher();
         String socketId = identify(remote);
-        activeId = identify(client, remote);
+        String profileId = identify(client, remote);
+        activeId = profileId;
         activeLabel = remote.toString();
-        Path profile = profileDir(client);
-        try {
-            // Earlier builds identified profiles by the resolved socket IP.
-            // Prefer the address the player entered, and carry an old IP-based
-            // profile forward when no profile for that address exists yet.
-            Path previousProfile = profilesDir(client).resolve(socketId);
-            if (!profile.equals(previousProfile) && !Files.exists(profile) && Files.exists(previousProfile)) {
-                try { Files.move(previousProfile, profile); }
-                catch (IOException e) { log("Could not migrate the previous IP-based profile", e); }
-            }
-            Files.createDirectories(profile);
-            captureDefaults(client);
-            Files.createDirectories(root(client));
-            Files.writeString(root(client).resolve("active-profile.txt"), activeId);
-            Path options = profile.resolve("options.txt");
-            if (Files.exists(options)) {
-                OptionsProfileSnapshot.apply(options, optionsFile(client));
-                client.options.load();
-            } else persistOptions(client);
+        activationPending = true;
 
-            Path profileExtraOptions = profile.resolve("root-options");
-            if (Files.exists(profileExtraOptions)) {
-                ExtraOptionsWatcher.restore(client.gameDirectory.toPath(), root(client).resolve("defaults/root-options"));
-                ExtraOptionsWatcher.overlay(profileExtraOptions, client.gameDirectory.toPath());
-            } else ExtraOptionsWatcher.copyCurrent(client.gameDirectory.toPath(), profileExtraOptions);
+        ConfigSnapshotWatcher closingConfigWatcher = configWatcher;
+        ExtraOptionsWatcher closingExtraOptionsWatcher = extraOptionsWatcher;
+        stopWatcher();
+        try { client.options.save(); }
+        catch (RuntimeException e) { log("Could not save options before loading a server profile", e); }
 
-            Path profileConfig = profile.resolve("config");
-            if (!Files.exists(profileConfig)) ConfigSnapshotWatcher.copyTree(configDir(), profileConfig);
-            else {
-                // Overlay the selected profile without deleting files a mod may keep outside its snapshot.
-                ConfigSnapshotWatcher.overlayTree(root(client).resolve("defaults/config"), configDir());
-                ConfigSnapshotWatcher.overlayTree(profileConfig, configDir());
-                ModConfigIntegrations.reloadProfileManagedConfigs();
+        Thread load = new Thread(() -> {
+            ConfigSnapshotWatcher profileConfigWatcher = null;
+            ExtraOptionsWatcher profileOptionsWatcher = null;
+            boolean loadOptions = false;
+            boolean reloadConfigs = false;
+            try {
+                if (closingConfigWatcher != null) closingConfigWatcher.awaitTermination();
+                if (closingExtraOptionsWatcher != null) closingExtraOptionsWatcher.awaitTermination();
+
+                Path profile = profilesDir(client).resolve(profileId);
+                Path previousProfile = profilesDir(client).resolve(socketId);
+                if (!profile.equals(previousProfile) && !Files.exists(profile) && Files.exists(previousProfile)) {
+                    try { Files.move(previousProfile, profile); }
+                    catch (IOException e) { log("Could not migrate the previous IP-based profile", e); }
+                }
+                Files.createDirectories(profile);
+                captureDefaults(client);
+                Files.createDirectories(root(client));
+                Files.writeString(root(client).resolve("active-profile.txt"), profileId);
+
+                Path options = profile.resolve("options.txt");
+                loadOptions = Files.exists(options);
+                if (loadOptions) OptionsProfileSnapshot.apply(options, optionsFile(client));
+                else OptionsProfileSnapshot.save(optionsFile(client), options);
+
+                Path profileExtraOptions = profile.resolve("root-options");
+                if (Files.exists(profileExtraOptions)) {
+                    ExtraOptionsWatcher.restore(client.gameDirectory.toPath(), root(client).resolve("defaults/root-options"));
+                    ExtraOptionsWatcher.overlay(profileExtraOptions, client.gameDirectory.toPath());
+                } else ExtraOptionsWatcher.copyCurrent(client.gameDirectory.toPath(), profileExtraOptions);
+
+                Path profileConfig = profile.resolve("config");
+                reloadConfigs = Files.exists(profileConfig);
+                if (!reloadConfigs) ConfigSnapshotWatcher.copyTree(configDir(), profileConfig);
+                else {
+                    ConfigSnapshotWatcher.overlayTree(root(client).resolve("defaults/config"), configDir());
+                    ConfigSnapshotWatcher.overlayTree(profileConfig, configDir());
+                }
+                profileConfigWatcher = new ConfigSnapshotWatcher(configDir(), profileConfig,
+                    (relative, deleted) -> mirrorConfigChange(client, relative, deleted));
+                profileOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), profileExtraOptions,
+                    (name, deleted) -> mirrorRootOptionChange(client, name, deleted));
+            } catch (Exception e) {
+                log("Could not activate profile", e);
+                if (profileConfigWatcher != null) profileConfigWatcher.close();
+                if (profileOptionsWatcher != null) profileOptionsWatcher.close();
+                profileConfigWatcher = null;
+                profileOptionsWatcher = null;
+                client.execute(() -> failActivation(client, profileId, e));
+                return;
             }
-            configWatcher = new ConfigSnapshotWatcher(configDir(), profileConfig,
-                (relative, deleted) -> mirrorConfigChange(client, relative, deleted));
-            extraOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), profileExtraOptions,
-                (name, deleted) -> mirrorRootOptionChange(client, name, deleted));
-            message(client, "serverbound.message.profile_activated", activeLabel);
-        } catch (Exception e) {
-            log("Could not activate profile", e);
-            message(client, "serverbound.message.profile_load_failed");
-            stopWatcher();
-            activeId = null;
-            clearMarker(client);
-            startDefaultWatcher(client);
+            ConfigSnapshotWatcher readyConfigWatcher = profileConfigWatcher;
+            ExtraOptionsWatcher readyOptionsWatcher = profileOptionsWatcher;
+            boolean applyOptions = loadOptions;
+            boolean applyConfigs = reloadConfigs;
+            client.execute(() -> finishActivation(client, profileId, applyOptions, applyConfigs,
+                readyConfigWatcher, readyOptionsWatcher));
+        }, "ServerConfigSaver-profile-activate");
+        load.setDaemon(true);
+        load.start();
+    }
+
+    private static synchronized void finishActivation(Minecraft client, String profileId,
+            boolean loadOptions, boolean reloadConfigs, ConfigSnapshotWatcher profileConfigWatcher,
+            ExtraOptionsWatcher profileOptionsWatcher) {
+        if (!profileId.equals(activeId)) {
+            if (profileConfigWatcher != null) profileConfigWatcher.close();
+            if (profileOptionsWatcher != null) profileOptionsWatcher.close();
+            return;
+        }
+        configWatcher = profileConfigWatcher;
+        extraOptionsWatcher = profileOptionsWatcher;
+        if (loadOptions && client.options != null) client.options.load();
+        if (reloadConfigs) ModConfigIntegrations.reloadProfileManagedConfigs();
+        activationPending = false;
+        message(client, "serverbound.message.profile_activated", activeLabel);
+        if (disconnectAfterActivation) {
+            disconnectAfterActivation = false;
+            SocketAddress queued = pendingRemote;
+            pendingRemote = null;
+            deactivate(client);
+            pendingRemote = queued;
         }
     }
 
+    private static synchronized void failActivation(Minecraft client, String profileId, Exception cause) {
+        if (!profileId.equals(activeId)) return;
+        activationPending = false;
+        activeId = null;
+        activeLabel = null;
+        if (disconnectAfterActivation) {
+            disconnectAfterActivation = false;
+            pendingRemote = null;
+        }
+        clearMarker(client);
+        restoreSharedSettings(client);
+        startDefaultWatcher(client);
+        message(client, "serverbound.message.profile_load_failed");
+        log("Could not complete profile activation", cause);
+    }
+
     public static synchronized void deactivate(Minecraft client) {
+        if (activationPending) { disconnectAfterActivation = true; return; }
         if (disconnectRestorePending) return;
         if (activeId == null) { connectedRemote = null; return; }
         ConfigSnapshotWatcher closingConfigWatcher = configWatcher;
@@ -204,16 +268,16 @@ public final class ProfileManager {
     }
 
     public static synchronized void onOptionsSaved(Minecraft client) {
-        if (disconnectRestorePending) return;
+        if (disconnectRestorePending || activationPending) return;
         persistOptions(client);
     }
 
     public static synchronized void autosave(Minecraft client) {
-        if (!disconnectRestorePending && activeId != null && enabled) client.options.save();
+        if (!disconnectRestorePending && !activationPending && activeId != null && enabled) client.options.save();
     }
 
     public static synchronized int toggle(Minecraft client) {
-        if (disconnectRestorePending) return 0;
+        if (disconnectRestorePending || activationPending) return 0;
         if (enabled) {
             stopWatcher();
             persist(client);
@@ -255,7 +319,7 @@ public final class ProfileManager {
     }
 
     public static synchronized int reset(Minecraft client) {
-        if (disconnectRestorePending) return 0;
+        if (disconnectRestorePending || activationPending) return 0;
         if (activeId == null) { message(client, "serverbound.message.reset_requires_server"); return 0; }
         stopWatcher();
         try {
@@ -285,7 +349,7 @@ public final class ProfileManager {
     }
 
     public static synchronized int copy(Minecraft client, String destination) {
-        if (disconnectRestorePending) return 0;
+        if (disconnectRestorePending || activationPending) return 0;
         if (activeId == null) { message(client, "serverbound.message.copy_requires_server"); return 0; }
         String target;
         try { target = identifyProfile(destination); }
