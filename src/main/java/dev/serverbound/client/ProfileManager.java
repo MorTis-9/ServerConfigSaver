@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.text.Normalizer;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Manages the vanilla options and best-effort snapshots of third-party config files. */
 public final class ProfileManager {
@@ -25,6 +26,8 @@ public final class ProfileManager {
     private static volatile boolean syncAllProfiles;
     private static boolean disconnectRestorePending;
     private static SocketAddress pendingRemote;
+    private static final AtomicBoolean optionsBroadcastPending = new AtomicBoolean();
+    private static final AtomicBoolean optionsBroadcastDirty = new AtomicBoolean();
     private static ConfigSnapshotWatcher configWatcher;
     private static ExtraOptionsWatcher extraOptionsWatcher;
 
@@ -332,9 +335,26 @@ public final class ProfileManager {
         Path currentSnapshot = activeId == null
             ? root(client).resolve("defaults/options.txt")
             : profileDir(client).resolve("options.txt");
-        try { OptionsProfileSnapshot.save(optionsFile(client), currentSnapshot); }
+        boolean changed = false;
+        try { changed = OptionsProfileSnapshot.save(optionsFile(client), currentSnapshot); }
         catch (IOException e) { log("Could not save vanilla options", e); }
-        if (syncAllProfiles) broadcastOptions(client);
+        if (syncAllProfiles && changed) scheduleOptionsBroadcast(client);
+    }
+
+    /** Keep profile fan-out off the client tick and coalesce rapid option changes. */
+    private static void scheduleOptionsBroadcast(Minecraft client) {
+        optionsBroadcastDirty.set(true);
+        if (!optionsBroadcastPending.compareAndSet(false, true)) return;
+        Thread sync = new Thread(() -> {
+            try {
+                while (optionsBroadcastDirty.getAndSet(false)) broadcastOptions(client);
+            } finally {
+                optionsBroadcastPending.set(false);
+                if (optionsBroadcastDirty.get()) scheduleOptionsBroadcast(client);
+            }
+        }, "ServerConfigSaver-options-sync");
+        sync.setDaemon(true);
+        sync.start();
     }
 
     private static void captureDefaults(Minecraft client) throws IOException {

@@ -14,11 +14,12 @@ final class OptionsProfileSnapshot {
 
     private OptionsProfileSnapshot() { }
 
-    static void save(Path liveOptions, Path snapshot) throws IOException {
+    static boolean save(Path liveOptions, Path snapshot) throws IOException {
         List<String> saved = withoutPackSelections(Files.readAllLines(liveOptions, StandardCharsets.UTF_8));
         if (Files.isRegularFile(snapshot)
-                && Files.readAllLines(snapshot, StandardCharsets.UTF_8).equals(saved)) return;
+                && Files.readAllLines(snapshot, StandardCharsets.UTF_8).equals(saved)) return false;
         write(snapshot, saved);
+        return true;
     }
 
     /** Apply profile options but retain the current global resource-pack selection. */

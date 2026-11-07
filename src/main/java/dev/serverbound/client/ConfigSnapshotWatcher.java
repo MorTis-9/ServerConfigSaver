@@ -56,13 +56,28 @@ final class ConfigSnapshotWatcher implements AutoCloseable {
     }
 
     private void watch() {
+        long lastFullScan = System.nanoTime();
+        long eventScanAt = Long.MAX_VALUE;
         while (running.get()) {
             try {
-                // WatchService events are a fast hint, while the periodic scan also
-                // catches OVERFLOW and filesystems that coalesce or miss events.
-                WatchKey key = watcher.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS);
-                if (key != null) handleEvents(key);
-                syncStableFiles();
+                WatchKey key = watcher.poll(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+                long now = System.nanoTime();
+                if (key != null) {
+                    handleEvents(key);
+                    // Coalesce a burst of mod writes and scan shortly after they settle.
+                    eventScanAt = now + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(200);
+                }
+                boolean eventScanDue = now >= eventScanAt;
+                boolean recoveryScanDue = now - lastFullScan >= java.util.concurrent.TimeUnit.SECONDS.toNanos(4);
+                if (eventScanDue || recoveryScanDue) {
+                    syncStableFiles();
+                    if (eventScanDue) {
+                        Thread.sleep(100);
+                        syncStableFiles();
+                    }
+                    lastFullScan = System.nanoTime();
+                    eventScanAt = Long.MAX_VALUE;
+                }
             } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
             catch (Exception e) {
                 if (running.get()) org.slf4j.LoggerFactory.getLogger("Serverbound")
