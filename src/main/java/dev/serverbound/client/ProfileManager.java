@@ -25,6 +25,8 @@ public final class ProfileManager {
     private static boolean enabled = true;
     private static volatile boolean syncAllProfiles;
     private static boolean disconnectRestorePending;
+    private static boolean disableRestorePending;
+    private static boolean disconnectDuringDisable;
     private static SocketAddress pendingRemote;
     private static final AtomicBoolean optionsBroadcastPending = new AtomicBoolean();
     private static final AtomicBoolean optionsBroadcastDirty = new AtomicBoolean();
@@ -64,6 +66,10 @@ public final class ProfileManager {
     }
 
     public static synchronized void activate(Minecraft client, SocketAddress remote) {
+        if (disableRestorePending) {
+            connectedRemote = remote;
+            return;
+        }
         if (disconnectRestorePending) {
             pendingRemote = remote;
             return;
@@ -120,6 +126,7 @@ public final class ProfileManager {
     }
 
     public static synchronized void deactivate(Minecraft client) {
+        if (disableRestorePending) { disconnectDuringDisable = true; connectedRemote = null; return; }
         if (disconnectRestorePending) return;
         if (activeId == null) { connectedRemote = null; return; }
         ConfigSnapshotWatcher closingConfigWatcher = configWatcher;
@@ -200,31 +207,70 @@ public final class ProfileManager {
     }
 
     public static synchronized void onOptionsSaved(Minecraft client) {
-        if (disconnectRestorePending) return;
+        if (disconnectRestorePending || disableRestorePending) return;
         persistOptions(client);
     }
 
     public static synchronized void autosave(Minecraft client) {
-        if (!disconnectRestorePending && activeId != null && enabled) client.options.save();
+        if (!disconnectRestorePending && !disableRestorePending && activeId != null && enabled) client.options.save();
     }
 
     public static synchronized int toggle(Minecraft client) {
-        if (disconnectRestorePending) return 0;
+        if (disconnectRestorePending || disableRestorePending) return 0;
         if (enabled) {
-            stopWatcher();
-            persist(client);
-            // If profiles are disabled while connected, first return to the
-            // shared snapshot so server-specific values don't become the new
-            // shared defaults.
-            if (activeId != null) restoreSharedSettings(client);
-            try { refreshDefaults(client); } catch (IOException e) { log("Could not update shared defaults", e); }
             enabled = false;
             saveSettings(client);
-            clearMarker(client);
-            activeId = null;
-            activeLabel = null;
-            startDefaultWatcher(client);
-            message(client, "serverbound.message.profiles_disabled");
+            if (activeId == null) {
+                message(client, "serverbound.message.profiles_disabled");
+                return 1;
+            }
+            disableRestorePending = true;
+            disconnectDuringDisable = false;
+            ConfigSnapshotWatcher closingConfigWatcher = configWatcher;
+            ExtraOptionsWatcher closingExtraOptionsWatcher = extraOptionsWatcher;
+            stopWatcher();
+            try { client.options.save(); }
+            catch (RuntimeException e) { log("Could not save options before disabling profiles", e); }
+
+            Thread restore = new Thread(() -> {
+                ConfigSnapshotWatcher sharedConfigWatcher = null;
+                ExtraOptionsWatcher sharedOptionsWatcher = null;
+                boolean restored = false;
+                try {
+                    if (closingConfigWatcher != null) closingConfigWatcher.awaitTermination();
+                    if (closingExtraOptionsWatcher != null) closingExtraOptionsWatcher.awaitTermination();
+
+                    Path profile = profileDir(client);
+                    OptionsProfileSnapshot.save(optionsFile(client), profile.resolve("options.txt"));
+                    ConfigSnapshotWatcher.syncTree(configDir(), profile.resolve("config"));
+                    ExtraOptionsWatcher.copyCurrent(client.gameDirectory.toPath(), profile.resolve("root-options"));
+                    if (syncAllProfiles) {
+                        broadcastOptions(client);
+                        broadcastConfigTree(client);
+                        broadcastRootOptions(client);
+                    }
+
+                    Path defaults = root(client).resolve("defaults");
+                    Path defaultOptions = defaults.resolve("options.txt");
+                    if (Files.exists(defaultOptions)) OptionsProfileSnapshot.apply(defaultOptions, optionsFile(client));
+                    ConfigSnapshotWatcher.overlayTree(defaults.resolve("config"), configDir());
+                    ExtraOptionsWatcher.restore(client.gameDirectory.toPath(), defaults.resolve("root-options"));
+                    refreshDefaults(client);
+                    sharedConfigWatcher = new ConfigSnapshotWatcher(configDir(), defaults.resolve("config"),
+                        (relative, deleted) -> mirrorConfigChange(client, relative, deleted));
+                    sharedOptionsWatcher = new ExtraOptionsWatcher(client.gameDirectory.toPath(), defaults.resolve("root-options"),
+                        (name, deleted) -> mirrorRootOptionChange(client, name, deleted));
+                    restored = true;
+                } catch (Exception e) {
+                    log("Could not finish disabling server profiles", e);
+                }
+                ConfigSnapshotWatcher readyConfigWatcher = sharedConfigWatcher;
+                ExtraOptionsWatcher readyOptionsWatcher = sharedOptionsWatcher;
+                boolean success = restored;
+                client.execute(() -> finishDisableProfiles(client, readyConfigWatcher, readyOptionsWatcher, success));
+            }, "ServerConfigSaver-disable-profiles");
+            restore.setDaemon(true);
+            restore.start();
         } else {
             enabled = true;
             saveSettings(client);
@@ -234,9 +280,35 @@ public final class ProfileManager {
         return 1;
     }
 
+    private static synchronized void finishDisableProfiles(Minecraft client,
+            ConfigSnapshotWatcher sharedConfigWatcher, ExtraOptionsWatcher sharedOptionsWatcher,
+            boolean restored) {
+        if (restored) {
+            if (client.options != null) client.options.load();
+            if (client.options != null) ModConfigIntegrations.reloadProfileManagedConfigs();
+            clearMarker(client);
+            configWatcher = sharedConfigWatcher;
+            extraOptionsWatcher = sharedOptionsWatcher;
+        } else {
+            if (sharedConfigWatcher != null) sharedConfigWatcher.close();
+            if (sharedOptionsWatcher != null) sharedOptionsWatcher.close();
+            configWatcher = null;
+            extraOptionsWatcher = null;
+        }
+        activeId = null;
+        activeLabel = null;
+        if (disconnectDuringDisable) connectedRemote = null;
+        disconnectDuringDisable = false;
+        disableRestorePending = false;
+        pendingRemote = null;
+        if (restored) message(client, "serverbound.message.profiles_disabled");
+        else message(client, "serverbound.message.profile_load_failed");
+    }
+
     public static synchronized boolean syncAllProfiles() { return syncAllProfiles; }
 
     public static synchronized int toggleSyncAllProfiles(Minecraft client) {
+        if (disconnectRestorePending || disableRestorePending) return 0;
         syncAllProfiles = !syncAllProfiles;
         saveSettings(client);
         message(client, syncAllProfiles ? "serverbound.message.sync_all_enabled" : "serverbound.message.sync_all_disabled");
@@ -251,7 +323,7 @@ public final class ProfileManager {
     }
 
     public static synchronized int reset(Minecraft client) {
-        if (disconnectRestorePending) return 0;
+        if (disconnectRestorePending || disableRestorePending) return 0;
         if (activeId == null) { message(client, "serverbound.message.reset_requires_server"); return 0; }
         stopWatcher();
         try {
@@ -281,7 +353,7 @@ public final class ProfileManager {
     }
 
     public static synchronized int copy(Minecraft client, String destination) {
-        if (disconnectRestorePending) return 0;
+        if (disconnectRestorePending || disableRestorePending) return 0;
         if (activeId == null) { message(client, "serverbound.message.copy_requires_server"); return 0; }
         String target;
         try { target = identifyProfile(destination); }
